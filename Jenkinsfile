@@ -1,66 +1,137 @@
-properties(
-  [
-    disableConcurrentBuilds(),
-    disableResume(),
-    buildDiscarder(
-      logRotator(
-        artifactDaysToKeepStr: '60',
-        daysToKeepStr: '60')
-    ),
-  ]
-)
+#!/usr/bin/env groovy
 
-// https://issues.jenkins-ci.org/browse/JENKINS-33511
-def set_workspace() {
-  if(env.WORKSPACE == null) {
-    env.WORKSPACE = WORKSPACE = pwd()
-  }
-}
+node {
+    checkout scm
+    def release = load("pipeline-scripts/release.groovy")
+    def buildlib = release.buildlib
+    def commonlib = release.commonlib
+    def slacklib = commonlib.slacklib
+    commonlib.describeJob("tarball-sources", """
+        <h2>Prepare container-first tarball sources for publishing</h2>
+        <b>Timing</b>: After the release job has run. See:
+        <a href="https://github.com/openshift/art-docs/blob/master/4.y.z-stream.md#provide-non-golang-container-first-sources-to-rcm" target="_blank">the docs</a>
 
-node('openshift-build-1') {
-  try {
-    timeout(time: 30, unit: 'MINUTES') {
-      deleteDir()
-      set_workspace()
-      dir('aos-cd-jobs') {
-        stage('clone') {
-          checkout scm
-          sh 'git checkout master'
+        We have a legal requirement to publish the sources of all our builds.
+        Containers which are built from source are mostly golang and handled by
+        automation. Those which are not need to be published manually by EXD.
+        This job prepares those sources so that EXD can publish them.
+    """)
+
+
+    // Expose properties for a parameterized build
+    properties(
+        [
+            buildDiscarder(
+                logRotator(
+                    artifactDaysToKeepStr: '',
+                    artifactNumToKeepStr: '',
+                    daysToKeepStr: '',
+                    numToKeepStr: '')),
+            [
+                $class: 'ParametersDefinitionProperty',
+                parameterDefinitions: [
+                    commonlib.ocpVersionParam('VERSION'),
+                    string(
+                        name: "ASSEMBLY",
+                        description: "The name of an assembly; must be defined in releases.yml (e.g. 4.9.1)",
+                        defaultValue: "stream",
+                        trim: true
+                    ),
+                    string(
+                        name: 'ADVISORY',
+                        description: '(Optional) Image release advisory number. Leave empty to load from ocp-build-data.',
+                        defaultValue: "",
+                        trim: true,
+                    ),
+                    string(
+                        name: 'MAIL_LIST_FAILURE',
+                        description: 'Failure Mailing List',
+                        defaultValue: [
+                            'aos-art-automation+failed-release@redhat.com'
+                        ].join(','),
+                        trim: true,
+                    ),
+                    booleanParam(
+                        name: "DRY_RUN",
+                        description: "Take no action, just echo what the job would have done.",
+                        defaultValue: false
+                    ),
+                    commonlib.mockParam(),
+                ]
+            ],
+        ]
+    )
+
+    commonlib.checkMock()
+
+    try {
+        sshagent(['openshift-bot']) {
+            currentBuild.description = "OCP ${params.VERSION} - ${params.ASSEMBLY}"
+            advisory = params.ADVISORY ? Integer.parseInt(params.ADVISORY.toString()) : 0
+
+            def output = ""
+
+            stage("run tarball-sources") {
+                sh "rm -rf ./artcd_working"
+                sh "mkdir -p ./artcd_working"
+                def cmd = [
+                    "artcd",
+                    "-v",
+                    "--working-dir=./artcd_working",
+                    "--config", "./config/artcd.toml",
+                ]
+                if (params.DRY_RUN) {
+                    cmd << "--dry-run"
+                }
+                cmd += [
+                    "tarball-sources",
+                    "--group", "openshift-${params.VERSION}",
+                    "--assembly", params.ASSEMBLY,
+                ]
+                if (advisory) {
+                    cmd << "--advisory" << "${advisory}"
+                }
+                if (params.DEFAULT_ADVISORIES) {
+                    cmd << "--default-advisories"
+                }
+                sshagent(["openshift-bot"]) {
+                    // pyartcd/pyartcd/util.py kinit uses these environment variables.
+                    withCredentials([string(credentialsId: 'jboss-jira-token', variable: 'JIRA_TOKEN'), file(credentialsId: 'exd-ocp-buildvm-bot-prod.keytab', variable: 'DISTGIT_KEYTAB_FILE'), string(credentialsId: 'exd-ocp-buildvm-bot-prod.user', variable: 'DISTGIT_KEYTAB_USER')]) {
+                        echo "Will run ${cmd}"
+                        output = commonlib.shell(script: cmd.join(' '), returnStdout: true)
+                    }
+                }
+            }
+
+            stage("slack notification to release channel") {
+                def jiraKey = (output =~ /CLOUDDST-\d+/)[0]
+                jiraCardURL = "https://issues.redhat.com/browse/${jiraKey}"
+
+                slacklib.to(version).say("""
+                *:white_check_mark: tarball-sources sent to CLOUDDST*
+CLOUDDST JIRA: ${jiraCardURL}
+buildvm job:   ${commonlib.buildURL('console')}
+                """)
+            }
         }
-        stage('run') {
-          final url = sh(
-            returnStdout: true,
-            script: 'git config remote.origin.url')
-          if(!(url =~ /^[-\w]+@[-\w]+(\.[-\w]+)*:/)) {
-            error('This job uses ssh keys for auth, please use an ssh url')
-          }
-          def prune = true, key = 'openshift-bot'
-          if(url.trim() != 'git@github.com:openshift-eng/aos-cd-jobs.git') {
-            prune = false
-            key = "${(url =~ /.*:([^\/]+)/)[0][1]}-aos-cd-bot"
-          }
-          sshagent([key]) {
-            sh """\
-virtualenv ../env/ -p python3
-. ../env/bin/activate
-pip install gitpython
-export GIT_PYTHON_TRACE=full
-${prune ? 'python -m aos_cd_jobs.pruner' : 'echo Fork, skipping pruner'}
-python -m aos_cd_jobs.updater
-"""
-          }
-        }
-      }
+
+    } catch (err) {
+        slacklib.to(version).say("""
+        *:heavy_exclamation_mark: @release-artists tarball-sources failed*
+        buildvm job: ${commonlib.buildURL('console')}
+        """)
+
+        commonlib.email(
+            to: "${params.MAIL_LIST_FAILURE}",
+            replyTo: "aos-team-art@redhat.com",
+            from: "aos-art-automation@redhat.com",
+            subject: "Error running OCP Tarball sources",
+            body: "Encountered an error while running OCP Tarball sources: ${err}");
+        currentBuild.description = "Error while running OCP Tarball sources:\n${err}"
+        currentBuild.result = "FAILURE"
+        throw err
+    } finally {
+        buildlib.cleanWorkspace()
     }
-  } catch(err) {
-    mail(
-      to: 'jupierce@redhat.com',
-      from: "aos-cicd@redhat.com",
-      subject: 'aos-cd-jobs-branches job: error',
-      body: """\
-Encountered an error while running the aos-cd-jobs-branches job: ${err}\n\n
-Jenkins job: ${env.BUILD_URL}
-""")
-    throw err
-  }
+
 }
