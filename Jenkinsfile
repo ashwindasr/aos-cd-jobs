@@ -1,66 +1,149 @@
+#!/usr/bin/env groovy
+
 properties(
-  [
-    disableConcurrentBuilds(),
-    disableResume(),
-    buildDiscarder(
-      logRotator(
-        artifactDaysToKeepStr: '60',
-        daysToKeepStr: '60')
-    ),
-  ]
+    [
+        [ $class : 'ParametersDefinitionProperty', parameterDefinitions: [
+                [
+                    name: 'JENKINS_VERSION',
+                    description: 'Minimum required Jenkins version',
+                    $class: 'hudson.model.StringParameterDefinition',
+                    defaultValue: '2.42'
+                ],
+                [
+                    name: 'OCP_BRANCH',
+                    description: 'OCP target branch',
+                    $class: 'hudson.model.ChoiceParameterDefinition',
+                    choices: [
+                            'rhaos-4.10-rhel-8',
+                            'rhaos-4.9-rhel-8',
+                            'rhaos-4.7-rhel-8',
+                        ].join('\n'),
+                    defaultValue: 'rhaos-4.10-rhel-8'
+                ],
+                [
+                    name: 'PLUGIN_LIST',
+                    description: 'List of plugin:version to include, one per line',
+                    $class: 'hudson.model.TextParameterDefinition'
+                ],
+                [
+                    name: 'TRACKERS',
+                    description: 'Comma or space separated list of trackers this build will fix',
+                    $class: 'hudson.model.StringParameterDefinition',
+                    defaultValue: ''
+                ],
+                [
+                    name: 'MAIL_LIST_SUCCESS',
+                    description: 'Success Mailing List',
+                    $class: 'hudson.model.StringParameterDefinition',
+                    defaultValue: 'aos-art-automation+passed-jenkins-plugins-update@redhat.com,openshift-dev-services+jenkins@redhat.com'
+                ],
+                [
+                    name: 'MAIL_LIST_FAILURE',
+                    description: 'Failure Mailing List',
+                    $class: 'hudson.model.StringParameterDefinition',
+                    defaultValue: 'aos-art-automation+failed-jenkins-plugins-update@redhat.com,openshift-dev-services+jenkins@redhat.com'
+                ],
+                [
+                    name: 'TARGET_NODE',
+                    description: 'Jenkins agent node',
+                    $class: 'hudson.model.StringParameterDefinition',
+                    defaultValue: 'openshift-build-1'
+                ],
+                [
+                    $class: 'hudson.model.BooleanParameterDefinition',
+                    defaultValue: false,
+                    description: 'Mock run to pickup new Jenkins parameters?',
+                    name: 'MOCK'
+                ],
+            ]
+        ],
+        disableResume(),
+        disableConcurrentBuilds()
+    ]
 )
 
-// https://issues.jenkins-ci.org/browse/JENKINS-33511
-def set_workspace() {
-  if(env.WORKSPACE == null) {
-    env.WORKSPACE = WORKSPACE = pwd()
-  }
+def mail_success() {
+
+    jenkins_major = JENKINS_VERSION.tokenize('.')[0].toString()
+
+    distgit_link = "http://pkgs.devel.redhat.com/cgit/rpms/jenkins-${jenkins_major}-plugins/?h=${OCP_BRANCH}"
+
+    mail(
+        to: "${MAIL_LIST_SUCCESS}",
+        from: "aos-art-automation@redhat.com",
+        replyTo: 'aos-team-art@redhat.com',
+        subject: "jenkins plugins RPM for ${OCP_BRANCH} updated in dist-git",
+        body: """The Jenkins plugins RPM for ${OCP_BRANCH} has been updated in dist-git:
+${distgit_link}
+
+Minimum Jenkins version: ${JENKINS_VERSION}
+
+Plugin list:
+${PLUGIN_LIST}
+
+Plugin RPM update job: ${env.BUILD_URL}
+""");
 }
 
-node('openshift-build-1') {
-  try {
-    timeout(time: 30, unit: 'MINUTES') {
-      deleteDir()
-      set_workspace()
-      dir('aos-cd-jobs') {
-        stage('clone') {
-          checkout scm
-          sh 'git checkout master'
-        }
-        stage('run') {
-          final url = sh(
-            returnStdout: true,
-            script: 'git config remote.origin.url')
-          if(!(url =~ /^[-\w]+@[-\w]+(\.[-\w]+)*:/)) {
-            error('This job uses ssh keys for auth, please use an ssh url')
-          }
-          def prune = true, key = 'openshift-bot'
-          if(url.trim() != 'git@github.com:openshift-eng/aos-cd-jobs.git') {
-            prune = false
-            key = "${(url =~ /.*:([^\/]+)/)[0][1]}-aos-cd-bot"
-          }
-          sshagent([key]) {
-            sh """\
-virtualenv ../env/ -p python3
-. ../env/bin/activate
-pip install gitpython
-export GIT_PYTHON_TRACE=full
-${prune ? 'python -m aos_cd_jobs.pruner' : 'echo Fork, skipping pruner'}
-python -m aos_cd_jobs.updater
-"""
-          }
-        }
-      }
-    }
-  } catch(err) {
+def mail_failure(err) {
+
     mail(
-      to: 'jupierce@redhat.com',
-      from: "aos-cicd@redhat.com",
-      subject: 'aos-cd-jobs-branches job: error',
-      body: """\
-Encountered an error while running the aos-cd-jobs-branches job: ${err}\n\n
+        to: "${MAIL_LIST_FAILURE}",
+        from: "aos-art-automation@redhat.com",
+        replyTo: 'aos-team-art@redhat.com',
+        subject: "Error during jenkins plugin RPM update on dist-git",
+        body: """The job to update the jenkins plugins RPM in dist-git encountered an error:
+${err}
+
 Jenkins job: ${env.BUILD_URL}
-""")
-    throw err
-  }
+""");
+}
+
+node(TARGET_NODE) {
+
+    checkout scm
+
+    def buildlib = load( "pipeline-scripts/buildlib.groovy" )
+    buildlib.kinit()       // Sets up credentials for dist-git access
+
+    try {
+        stage ("prepare workspace") {
+
+            // Temporary file to write the plugin list to
+            tmpdir = pwd tmp:true
+            plugin_file = "${tmpdir}/jenkins-plugins.txt"
+            scripts_dir = "${env.WORKSPACE}/hacks/update-jenkins-plugins"
+            // Note that collect-jenkins-plugins.sh has a hardcoded output dir:
+            plugin_dir = "${scripts_dir}/working/hpis"
+
+            writeFile file: plugin_file, text: PLUGIN_LIST
+        }
+
+        stage ("collect plugins") {
+            withEnv(["PATH+SCRIPTS=${scripts_dir}"]) {
+                sh "collect-jenkins-plugins.sh ${JENKINS_VERSION} ${plugin_file}"
+            }
+        }
+
+        stage ("update dist-git") {
+            withEnv(["PATH+SCRIPTS=${scripts_dir}"]) {
+                sh "update-dist-git.sh ${JENKINS_VERSION} ${OCP_BRANCH} ${plugin_dir}"
+            }
+        }
+
+        stage ("cleanup") {
+            sh "rm -rf ${plugin_dir} ${plugin_file}"
+        }
+
+        mail_success()
+
+    } catch (err) {
+
+        mail_failure(err)
+
+        // Re-throw the error in order to fail the job
+        throw err
+    } finally {
+        buildlib.cleanWorkspace()
+    }
 }
