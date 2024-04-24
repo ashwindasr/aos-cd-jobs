@@ -76,71 +76,9 @@ node {
                         defaultValue: "",
                         trim: true,
                     ),
-                    booleanParam(
-                        name: 'PIN_BUILDS',
-                        description: 'Build only specified rpms/images regardless of whether source has changed. WARNING: Disable this to use scan-sources as the source',
-                        defaultValue: true,
-                    ),
-                    choice(
-                        name: 'BUILD_RPMS',
-                        description: 'Which RPMs are candidates for building? "only/except" refer to list below',
-                        choices: [
-                            "none",
-                            "only",
-                            "all",
-                            "except",
-                        ].join("\n"),
-                    ),
-                    string(
-                        name: 'RPM_LIST',
-                        description: '(Optional) Comma/space-separated list to include/exclude per BUILD_RPMS (e.g. openshift,openshift-kuryr)',
-                        defaultValue: "",
-                        trim: true,
-                    ),
-                    choice(
-                        name: 'BUILD_IMAGES',
-                        description: 'Which images are candidates for building? "only/except" refer to list below',
-                        choices: [
-                            "only",
-                            "none",
-                            "all",
-                            "except",
-                        ].join("\n")
-                    ),
                     string(
                         name: 'IMAGE_LIST',
                         description: '(Optional) Comma/space-separated list to include/exclude per BUILD_IMAGES (e.g. logging-kibana5,openshift-jenkins-2)',
-                        defaultValue: "",
-                        trim: true,
-                    ),
-                    booleanParam(
-                        name: 'SKIP_PLASHETS',
-                        description: 'Do not build plashets (for example to save time when running multiple builds against test assembly)',
-                        defaultValue: true,
-                    ),
-                    booleanParam(
-                        name: 'COMMENT_ON_PR',
-                        description: 'Comment on source PR after successful build',
-                        defaultValue: false,
-                    ),
-                    commonlib.suppressEmailParam(),
-                    string(
-                        name: 'MAIL_LIST_SUCCESS',
-                        description: '(Optional) Success Mailing List\naos-cicd@redhat.com,aos-qe@redhat.com',
-                        defaultValue: "",
-                        trim: true,
-                    ),
-                    string(
-                        name: 'MAIL_LIST_FAILURE',
-                        description: 'Failure Mailing List',
-                        defaultValue: [
-                            'aos-art-automation+failed-ocp4-build@redhat.com'
-                        ].join(','),
-                        trim: true
-                    ),
-                    string(
-                        name: 'SPECIAL_NOTES',
-                        description: '(Optional) special notes to include in the build email',
                         defaultValue: "",
                         trim: true,
                     ),
@@ -174,7 +112,7 @@ node {
                     cmd << "--dry-run"
                 }
                 cmd += [
-                    "ocp4",
+                    "k_ocp4",
                     "--version=${params.BUILD_VERSION}",
                     "--assembly=${params.ASSEMBLY}",
                 ]
@@ -184,29 +122,9 @@ node {
                 if (params.DOOZER_DATA_GITREF) {
                     cmd << "--data-gitref=${params.DOOZER_DATA_GITREF}"
                 }
-                if (params.PIN_BUILDS) {
-                    cmd << "--pin-builds"
-                }
-                if (params.COMMENT_ON_PR) {
-                    cmd << "--comment-on-pr"
-                }
                 cmd += [
-                    "--build-rpms=${params.BUILD_RPMS}",
-                    "--rpm-list=${params.RPM_LIST}",
-                    "--build-images=${params.BUILD_IMAGES}",
                     "--image-list=${commonlib.cleanCommaList(params.IMAGE_LIST)}"
                 ]
-                if (params.SKIP_PLASHETS) {
-                    cmd << "--skip-plashets"
-                }
-                if (params.IGNORE_LOCKS) {
-                    cmd << "--ignore-locks"
-                }
-
-                // Needed to detect manual builds
-                wrap([$class: 'BuildUser']) {
-                        builderEmail = env.BUILD_USER_EMAIL
-                    }
 
                 buildlib.withAppCiAsArtPublish() {
                     withCredentials([
@@ -231,50 +149,6 @@ node {
                     }
                 }
             }
-
-            stage("terminate") {
-                // If any image build/push failures occurred, mark the job run as unstable
-                def record_log = buildlib.parse_record_log("artcd_working/doozer_working/")
-                builds = record_log.get('build', [])
-                for (i = 0; i < builds.size(); i++) {
-                    bld = builds[i]
-                    if (bld['status'] != '0' || bld['push_status'] != '0') {
-                        currentBuild.result = "UNSTABLE"
-                    }
-                }
-            }
         }
-    } catch (err) {
-        if (params.MAIL_LIST_FAILURE.trim()) {
-            commonlib.email(
-                to: params.MAIL_LIST_FAILURE,
-                from: "aos-team-art@redhat.com",
-                subject: "Error building OCP ${params.BUILD_VERSION}",
-                body:
-"""\
-Pipeline build "${currentBuild.displayName}" encountered an error:
-${currentBuild.description}
-
-
-View the build artifacts and console output on Jenkins:
-    - Jenkins job: ${commonlib.buildURL()}
-    - Console output: ${commonlib.buildURL('console')}
-
-"""
-
-            )
-        }
-        currentBuild.description += "<hr />${err}"
-        currentBuild.result = "FAILURE"
-        throw err  // gets us a stack trace FWIW
-    } finally {
-        compressBrewLogs()
-        commonlib.safeArchiveArtifacts([
-            "artcd_working/doozer_working/*.log",
-            "artcd_working/doozer_working/brew-logs.tar.bz2",
-            "artcd_working/doozer_working/*.yaml",
-            "artcd_working/doozer_working/*.yml",
-        ])
-        buildlib.cleanWorkspace()
     }
 }
