@@ -87,7 +87,7 @@ node {
             // artcd command
             def cmd = [
                 "artcd",
-                "-v",
+                "-vv",
                 "--working-dir=./artcd_working",
                 "--config=./config/artcd.toml",
             ]
