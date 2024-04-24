@@ -111,19 +111,9 @@ node {
 
             buildlib.withAppCiAsArtPublish() {
                 withCredentials([
-                            string(credentialsId: 'jenkins-service-account', variable: 'JENKINS_SERVICE_ACCOUNT'),
-                            string(credentialsId: 'jenkins-service-account-token', variable: 'JENKINS_SERVICE_ACCOUNT_TOKEN'),
-                            string(credentialsId: 'redis-server-password', variable: 'REDIS_SERVER_PASSWORD'),
-                            string(credentialsId: 'redis-host', variable: 'REDIS_HOST'),
-                            string(credentialsId: 'redis-port', variable: 'REDIS_PORT'),
-                            string(credentialsId: 'gitlab-ocp-release-schedule-schedule', variable: 'GITLAB_TOKEN'),
                             string(credentialsId: 'openshift-bot-token', variable: 'GITHUB_TOKEN'),
                             string(credentialsId: 'jboss-jira-token', variable: 'JIRA_TOKEN'),
-                            aws(credentialsId: 's3-art-srv-enterprise', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'),
                             string(credentialsId: 'art-bot-slack-token', variable: 'SLACK_BOT_TOKEN'),
-                            usernamePassword(credentialsId: 'art-dash-db-login', passwordVariable: 'DOOZER_DB_PASSWORD', usernameVariable: 'DOOZER_DB_USER'),
-                            file(credentialsId: 'art-jenkins-ldap-serviceaccount-private-key', variable: 'RHSM_PULP_KEY'),
-                            file(credentialsId: 'art-jenkins-ldap-serviceaccount-client-cert', variable: 'RHSM_PULP_CERT'),
                         ]) {
                     withEnv(['DOOZER_DB_NAME=art_dash']) {
                         sh "rm -rf ./artcd_working && mkdir -p ./artcd_working"
