@@ -82,60 +82,56 @@ node {
     if (currentBuild.description == null) {
         currentBuild.description = ""
     }
+    sshagent(["openshift-bot"]) {
+        stage("initialize") {
+            currentBuild.displayName = "#${currentBuild.number}"
+        }
 
-    try {
-
-        sshagent(["openshift-bot"]) {
-            stage("initialize") {
-                currentBuild.displayName = "#${currentBuild.number}"
+        stage("ocp4") {
+            // artcd command
+            def cmd = [
+                "artcd",
+                "-v",
+                "--working-dir=./artcd_working",
+                "--config=./config/artcd.toml",
+            ]
+            if (params.DRY_RUN) {
+                cmd << "--dry-run"
             }
+            cmd += [
+                "k_ocp4",
+                "--version=${params.BUILD_VERSION}",
+                "--assembly=${params.ASSEMBLY}",
+            ]
+            if (params.DOOZER_DATA_PATH) {
+                cmd << "--data-path=${params.DOOZER_DATA_PATH}"
+            }
+            if (params.DOOZER_DATA_GITREF) {
+                cmd << "--data-gitref=${params.DOOZER_DATA_GITREF}"
+            }
+            cmd += [
+                "--image-list=${commonlib.cleanCommaList(params.IMAGE_LIST)}"
+            ]
 
-            stage("ocp4") {
-                // artcd command
-                def cmd = [
-                    "artcd",
-                    "-v",
-                    "--working-dir=./artcd_working",
-                    "--config=./config/artcd.toml",
-                ]
-                if (params.DRY_RUN) {
-                    cmd << "--dry-run"
-                }
-                cmd += [
-                    "k_ocp4",
-                    "--version=${params.BUILD_VERSION}",
-                    "--assembly=${params.ASSEMBLY}",
-                ]
-                if (params.DOOZER_DATA_PATH) {
-                    cmd << "--data-path=${params.DOOZER_DATA_PATH}"
-                }
-                if (params.DOOZER_DATA_GITREF) {
-                    cmd << "--data-gitref=${params.DOOZER_DATA_GITREF}"
-                }
-                cmd += [
-                    "--image-list=${commonlib.cleanCommaList(params.IMAGE_LIST)}"
-                ]
-
-                buildlib.withAppCiAsArtPublish() {
-                    withCredentials([
-                                string(credentialsId: 'jenkins-service-account', variable: 'JENKINS_SERVICE_ACCOUNT'),
-                                string(credentialsId: 'jenkins-service-account-token', variable: 'JENKINS_SERVICE_ACCOUNT_TOKEN'),
-                                string(credentialsId: 'redis-server-password', variable: 'REDIS_SERVER_PASSWORD'),
-                                string(credentialsId: 'redis-host', variable: 'REDIS_HOST'),
-                                string(credentialsId: 'redis-port', variable: 'REDIS_PORT'),
-                                string(credentialsId: 'gitlab-ocp-release-schedule-schedule', variable: 'GITLAB_TOKEN'),
-                                string(credentialsId: 'openshift-bot-token', variable: 'GITHUB_TOKEN'),
-                                string(credentialsId: 'jboss-jira-token', variable: 'JIRA_TOKEN'),
-                                aws(credentialsId: 's3-art-srv-enterprise', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'),
-                                string(credentialsId: 'art-bot-slack-token', variable: 'SLACK_BOT_TOKEN'),
-                                usernamePassword(credentialsId: 'art-dash-db-login', passwordVariable: 'DOOZER_DB_PASSWORD', usernameVariable: 'DOOZER_DB_USER'),
-                                file(credentialsId: 'art-jenkins-ldap-serviceaccount-private-key', variable: 'RHSM_PULP_KEY'),
-                                file(credentialsId: 'art-jenkins-ldap-serviceaccount-client-cert', variable: 'RHSM_PULP_CERT'),
-                            ]) {
-                        withEnv(["BUILD_USER_EMAIL=${builderEmail?: ''}", "BUILD_URL=${BUILD_URL}", "JOB_NAME=${JOB_NAME}", 'DOOZER_DB_NAME=art_dash']) {
-                            sh "rm -rf ./artcd_working && mkdir -p ./artcd_working"
-                            sh(script: cmd.join(' '), returnStdout: true)
-                        }
+            buildlib.withAppCiAsArtPublish() {
+                withCredentials([
+                            string(credentialsId: 'jenkins-service-account', variable: 'JENKINS_SERVICE_ACCOUNT'),
+                            string(credentialsId: 'jenkins-service-account-token', variable: 'JENKINS_SERVICE_ACCOUNT_TOKEN'),
+                            string(credentialsId: 'redis-server-password', variable: 'REDIS_SERVER_PASSWORD'),
+                            string(credentialsId: 'redis-host', variable: 'REDIS_HOST'),
+                            string(credentialsId: 'redis-port', variable: 'REDIS_PORT'),
+                            string(credentialsId: 'gitlab-ocp-release-schedule-schedule', variable: 'GITLAB_TOKEN'),
+                            string(credentialsId: 'openshift-bot-token', variable: 'GITHUB_TOKEN'),
+                            string(credentialsId: 'jboss-jira-token', variable: 'JIRA_TOKEN'),
+                            aws(credentialsId: 's3-art-srv-enterprise', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'),
+                            string(credentialsId: 'art-bot-slack-token', variable: 'SLACK_BOT_TOKEN'),
+                            usernamePassword(credentialsId: 'art-dash-db-login', passwordVariable: 'DOOZER_DB_PASSWORD', usernameVariable: 'DOOZER_DB_USER'),
+                            file(credentialsId: 'art-jenkins-ldap-serviceaccount-private-key', variable: 'RHSM_PULP_KEY'),
+                            file(credentialsId: 'art-jenkins-ldap-serviceaccount-client-cert', variable: 'RHSM_PULP_CERT'),
+                        ]) {
+                    withEnv(["BUILD_USER_EMAIL=${builderEmail?: ''}", "BUILD_URL=${BUILD_URL}", "JOB_NAME=${JOB_NAME}", 'DOOZER_DB_NAME=art_dash']) {
+                        sh "rm -rf ./artcd_working && mkdir -p ./artcd_working"
+                        sh(script: cmd.join(' '), returnStdout: true)
                     }
                 }
             }
