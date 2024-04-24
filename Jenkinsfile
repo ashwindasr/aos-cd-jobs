@@ -125,7 +125,7 @@ node {
                             file(credentialsId: 'art-jenkins-ldap-serviceaccount-private-key', variable: 'RHSM_PULP_KEY'),
                             file(credentialsId: 'art-jenkins-ldap-serviceaccount-client-cert', variable: 'RHSM_PULP_CERT'),
                         ]) {
-                    withEnv(["BUILD_USER_EMAIL=${builderEmail?: ''}", "BUILD_URL=${BUILD_URL}", "JOB_NAME=${JOB_NAME}", 'DOOZER_DB_NAME=art_dash']) {
+                    withEnv(['DOOZER_DB_NAME=art_dash']) {
                         sh "rm -rf ./artcd_working && mkdir -p ./artcd_working"
                         sh(script: cmd.join(' '), returnStdout: true)
                     }
