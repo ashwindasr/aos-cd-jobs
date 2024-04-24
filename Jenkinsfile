@@ -17,18 +17,8 @@ node {
     def commonlib = buildlib.commonlib
     def slacklib = commonlib.slacklib
 
-    commonlib.describeJob("ocp4", """
-        <h2>Build OCP 4.y components incrementally</h2>
-        <b>Timing</b>: Usually run automatically from merge_ocp.
-        Humans may run as needed. Locks prevent conflicts.
-
-        In typical usage, scans for changes that could affect package or image
-        builds and rebuilds the affected components.  Creates new plashets if
-        the automation is not frozen or if there are RPMs that are built in this run,
-        and runs other jobs to sync builds to nightlies, create
-        operator metadata, and sets MODIFIED bugs to ON_QA.
-
-        May also build unconditionally or with limited components.
+    commonlib.describeJob("k_ocp4", """
+        Konflux
     """)
 
 
