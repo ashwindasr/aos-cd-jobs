@@ -83,10 +83,6 @@ node {
         currentBuild.description = ""
     }
     sshagent(["openshift-bot"]) {
-        stage("initialize") {
-            currentBuild.displayName = "#${currentBuild.number}"
-        }
-
         stage("ocp4") {
             // artcd command
             def cmd = [
