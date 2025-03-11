@@ -92,16 +92,12 @@ node() {
                 cmd += [
                     "build-microshift-bootc",
                     "--data-path", params.DOOZER_DATA_PATH,
-
+                    "-g", "openshift-$params.BUILD_VERSION",
+                    "--assembly", params.ASSEMBLY,
                 ]
                 if (params.DOOZER_DATA_GITREF) {
                     cmd << "--data-gitref=${params.DOOZER_DATA_GITREF}"
                 }
-
-                cmd += [
-                    "-g", "openshift-$params.BUILD_VERSION",
-                    "--assembly", params.ASSEMBLY,
-                ]
                 if (params.FORCE_REBUILD) {
                     cmd << "--force"
                 }
