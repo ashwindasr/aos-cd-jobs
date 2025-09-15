@@ -23,6 +23,11 @@ node() {
                     description: 'OCP Version',
                 ),
                 string(
+                    name: 'GROUP',
+                    description: 'The OADP version group to use with -g flag',
+                    trim: true,
+                ),
+                string(
                     name: 'ASSEMBLY',
                     description: 'Assembly name.',
                     defaultValue: "stream",
@@ -140,6 +145,7 @@ node() {
                 cmd += [
                     "build-fbc",
                     "--version=${params.BUILD_VERSION}",
+                    "--group=${params.GROUP}",
                     "--assembly=${params.ASSEMBLY}",
                     "--data-path=${params.DOOZER_DATA_PATH}",
                     "--data-gitref=${params.DOOZER_DATA_GITREF}",
