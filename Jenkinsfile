@@ -24,7 +24,7 @@ node() {
                 ),
                 string(
                     name: 'GROUP',
-                    description: 'The OADP version group to use with -g flag',
+                    description: '(Optional) The group to be used, by default it will be assumed to be openshift-<version>',
                     trim: true,
                 ),
                 string(
@@ -145,12 +145,14 @@ node() {
                 cmd += [
                     "build-fbc",
                     "--version=${params.BUILD_VERSION}",
-                    "--group=${params.GROUP}",
                     "--assembly=${params.ASSEMBLY}",
                     "--data-path=${params.DOOZER_DATA_PATH}",
                     "--data-gitref=${params.DOOZER_DATA_GITREF}",
                     "--kubeconfig=${env.KONFLUX_SA_KUBECONFIG}",
                 ]
+                if (params.GROUP)
+                    cmd << "--group=${params.GROUP}"
+                if (params.ASSEMBLY
                 if (only)
                     cmd << "--only=${only.join(',')}"
                 if (exclude)
